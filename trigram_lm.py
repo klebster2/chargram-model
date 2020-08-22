@@ -25,23 +25,17 @@ TRAIN_METHODS={
     'PLUS_ONE',
 }
 
+#class NGramModel():
+#    def __init__(self):
+#        pass
+#
+#
+#
+
 class NGramTrainer():
     
-    def __init__(self, n, alphabet, symbols, digits, pad_char=PAD_CHAR):
+    def __init__(self, n):
         self.n = n
-        self.alphabet = self.load_str_set(alphabet)
-        self.symbols = self.load_str_set(symbols)
-        self.digits = self.load_str_set(digits)
-        self.char_set_str = f'{self.alphabet}{self.digits}{self.symbols} '
-
-        self.PAD_CHAR = PAD_CHAR
-        # ngram trans: transition gram counts
-        self.ngram_trans_count = self.init_dictionary_with_regexp(n, dict_type=int)
-        # ngram state: are counts of seeing n-1 characters
-        self.ngram_state_count = self.init_dictionary_with_regexp(n-1, dict_type=int)
-
-        self.ngram_trans_prob = self.init_dictionary_with_regexp(n, dict_type=float) # probability dictionary mapping trigram keys to smoothed probabilities
-        self.ngram_state_prob = self.init_dictionary_with_regexp(n-1, dict_type=float) # probability dictionary mapping bigram keys to smoothed probabilities
     
     def load_str_set(self, filename: str) -> str:
         """
@@ -104,11 +98,23 @@ class NGramTrainer():
         for k, v in self.ngram_trans_count.items():
             self.ngram_state_count[k[:self.n-1]]+=1
 
-    def train(self, alpha:float, trainfile: str) -> None:
+    def train(self, alpha:float, trainfile: str, alphabet:str, symbols:str, digits:str, pad_char:str) -> None:
         """
-        returns None, but updates dictionary counts
+        returns None, but reads and updates dictionary counts based on a file
         """
+        self.alphabet = self.load_str_set(alphabet)
+        self.symbols = self.load_str_set(symbols)
+        self.digits = self.load_str_set(digits)
+        self.char_set_str = f'{self.alphabet}{self.digits}{self.symbols} '
 
+        self.PAD_CHAR = pad_char
+        # ngram trans: transition gram counts
+        self.ngram_trans_count = self.init_dictionary_with_regexp(self.n, dict_type=int)
+        # ngram state: are counts of seeing n-1 characters
+        self.ngram_state_count = self.init_dictionary_with_regexp(self.n-1, dict_type=int)
+
+        self.ngram_trans_prob = self.init_dictionary_with_regexp(self.n, dict_type=float) # probability dictionary mapping trigram keys to smoothed probabilities
+        self.ngram_state_prob = self.init_dictionary_with_regexp(self.n-1, dict_type=float) # probability dictionary mapping bigram keys to smoothed probabilities
         self.ngram_trans_count = self.count_ngrams(trainfile, self.ngram_trans_count)
         self.update_state_count()
 
@@ -197,7 +203,7 @@ class NGramTrainer():
         generates a random sequence of specified length based on a model
         """
         if recursive_step == 0:
-            print(sequence)
+            return sequence
         else:
             # find partial key
             prev_two = {k:v for (k,v) in self.ngram_trans_prob.items() 
@@ -214,23 +220,24 @@ class NGramTrainer():
             sequence = self.model_generate_random_seq(recursive_step - 1, sequence, seq_length)
             return sequence
 
+        def read_char_probabilities(self, filename):
+            self.ngram_trans_prob = default(float)
+            with open(filename) as f:
+                for line in f:
+                    ngram, log_prob = line.strip().split("\t")
+                    self.ngram_trans_prob.update({ngram: float(log_prob)})
+
+
 def test_alphas(bigram_bin_size, bigram, trigram_train_dict, trigram_probabilities):
+    """
+    useful for testing models
+    """
     alpha_vals = np.arange(0.001,1,0.001)
 
     for x in range(0, len(alpha_vals)):
         trigram_probabilities = add_alpha_smoothing(bigram_bin_size, bigram, trigram_train_dict, trigram_probabilities, alpha_vals[x])
         perplexity            = perplexity_given_tri_counts(trigram_probabilities, trigram_test_dict)
         print(str(alpha_vals[x]) + ", " + str(perplexity))
-
-def read_char_probabilities(filename):
-    new_dictionary = init_dictionary_with_regexp(1)
-    
-    with open(filename) as f:
-        for line in f:
-            key, values = line.strip().split("\t")
-            new_dictionary[key] = float(value)
-    
-    return new_dictionary
 
 def test_bigram_bin_size(bigram, bigram_bin_size):
     for k, v in bigram.items():
@@ -248,46 +255,12 @@ def test_sum_to_one(trigram_probabilities):
         print(sum_to_one[k])
 
 
-def main(args):
-    
-    tri_trainer = NGramTrainer(
-        n = 3,
-        alphabet = args.alphabet,
-        symbols = args.symbols,
-        digits = args.digits,
-        pad_char = PAD_CHAR,
-    )
-
-    tri_trainer.train(
-        alpha = args.alpha,
-        trainfile = args.train_file,
-    )
-
-    tri_trainer.test(
-        test_file  = args.test_file,
-        test_level = args.test_level,
-    )
-
-    tri_trainer.model_generate_random_seq(
-        seq_length = args.random_sequence_length,
-    )
-
-    new_trigram_probabilities = read_char_probabilities(args.test_file)
-    random_seq_new            = generate_random_char_seq(new_trigram_probabilities, '##', 298, 298)
-    print("Random sequence generated by trigram generated from data/model-br.en: ")
-    print(random_seq_new)
-
-    # Tests 
-    # test_bigram_bin_size(bigram, bigram_bin_size)
-    # test_training_probabilities(trigram_probabilities)
-    # test_sum_to_one(new_trigram_probabilities)
-    return 1
-
 def get_args():
     parser = argparse.ArgumentParser(description="A program that can generate a ngram language model, with associated perplexities.")
     # add UNK token for LM
     parser.add_argument('--level', '-l', choices=['word','char'], help="Defines the level the trigram lm will work at. Level can either be word or character.")
     parser.add_argument('--train-file', '-t', action='store', help="train file")
+    parser.add_argument('--number', '-n', action='store', type=int, default=3, help="ngram level")
 
     parser.add_argument('--test-file', '-e', action='store', help="test file")
     parser.add_argument('--test-level', '-x', action='store', help="test level")
@@ -301,8 +274,58 @@ def get_args():
     parser.add_argument('--symbols', '-s', action='store', help="symbol dictionary")
 
     parser.add_argument('--random-sequence-length', '-r', action='store', type=int, help="length of random sequence based on trained/input model")
+
     args = parser.parse_args()
     return args
+
+
+def main(args):
+    
+    tri_trainer = \
+        NGramTrainer(
+            n = args.number,
+        )
+
+    if args.train_file: 
+
+        tri_trainer.train(
+            alpha = args.alpha,
+            trainfile = args.train_file,
+            alphabet = args.alphabet,
+            symbols = args.symbols,
+            digits = args.digits,
+            pad_char = PAD_CHAR,
+        )
+
+    elif args.model_file:
+
+        tri_trainer.read_char_probabilities(
+            args.model_file
+        )
+
+        # Tests 
+        # test_bigram_bin_size(bigram, bigram_bin_size)
+        # test_training_probabilities(trigram_probabilities)
+        # test_sum_to_one(new_trigram_probabilities)
+
+    if args.test_file and args.test_level:
+        tri_trainer.test(
+            test_file  = args.test_file,
+            test_level = args.test_level,
+        )
+
+    if args.random_sequence_length:
+        random_seq_new = \
+            tri_trainer.model_generate_random_seq(
+                seq_length = args.random_sequence_length,
+        )
+        if args.model_file:
+            print(f"Random sequence generated by trigram generated from {args.model_file}")
+        if args.train_file:
+            print(f"Random sequence generated by trigram generated from {args.train_file}")
+        print(random_seq_new)
+
+    return 1
 
 if __name__ == "__main__":
     args = get_args()
