@@ -23,33 +23,29 @@ TRAIN_METHODS={
     'PLUS_ONE',
 }
 
-
 class WordGramModel():
     def __init__(self):
         pass
 
-
 class NGramModel():
 
-    WILDCARD='~'
-
-    def __init__(self, n, lower, pad, diacritics, punctuations):
+    def __init__(self, n, lower, pad, wildcard, diacritics, punctuations):
         """
         n: define n in 'ngrams' to build a model for
         lower: lowercase input and model
-        pad: pad string
+        pad: considered meaningless (removed from raw string to pad HMM)
         diacritics: filepath to set of diacritics
         punctuations: filepath to punctuations
         """
-        self.n
         self.lower = lower
-        self.pad_char = pad
-
+        self.pad = pad
+        self.wildcard = wildcard
         diacritics_str = self.load_str_set(diacritics)
         # punctuations can be special characters
         punctuations_str = self.load_str_set(punctuations)
 
         self.others = f'{diacritics_str}{punctuations_str} '
+        self.str_set = f'{ascii_lowercase}0{self.others}{self.pad}'
          
     def load_str_set(self, filename: str) -> str:
         """
@@ -59,8 +55,6 @@ class NGramModel():
         with open(filename, 'r') as f:
             for line in f.readlines():
                 entry = line.strip()
-                if self.lower:
-                    entry = entry.lower()
                 if entry not in entries:
                     entries.append(entry)
         str_set = ''.join(entries)
@@ -84,36 +78,18 @@ class NGramModel():
         if self.lower == True:
             line = line.lower()
         line = re.sub(f'[0-9]', '0', line)
-        line = re.sub(f'([^a-zA-Z0-9{self.others}]|[{self.WILDCARD}\n])', '', line)
+        line = re.sub(f'([^a-zA-Z0-9{self.others}]|[{self.pad}{self.wildcard}\n])', '', line)
 
         # wrap line in padding
-        line = str(''.join([self.pad_char] * (self.n - 1))) + line + self.pad_char
+        line = str(''.join([self.pad] * (self.n - 1))) + line + self.pad
         return line
 
 
 class CharGramTrainer(NGramModel):
     
-    def __init__(self, n:int, lower:bool, pad:str, diacritics:str, punctuations:str):
+    def __init__(self, n:int, lower:bool, pad:str, wildcard:str, diacritics:str, punctuations:str):
         self.n = n
-        NGramModel.__init__(self, n, lower, pad, diacritics, punctuations)
-
-    def init_dictionary_with_regexp(self, n: int, dict_type: type) -> dict:
-        """
-        This function inits a dict to include 3 or 2 letter sequences.
-
-        Can't have : _#_ or ###
-        """
-        char_set_str = f'{ascii_lowercase}0{self.others}{self.pad_char}'
-        self.init_count_dict = defaultdict(dict_type)
-
-        # All strings permissible for ngram:
-        char_product = itertools.product(char_set_str, repeat=n) 
-        self.init_count_dict.update({''.join(i):dict_type(0) for i in char_product})
-        # TODO: define throw-out strings (for now we are only using perplexity)
-
-        init_count_dict = self.init_count_dict
-        del self.init_count_dict
-        return init_count_dict
+        NGramModel.__init__(self, n, lower, pad, wildcard, diacritics, punctuations)
 
     def update_state_count(self) -> None:
         """
@@ -132,23 +108,55 @@ class CharGramTrainer(NGramModel):
         """
         # initialise count dicts
         # ngram trans: transition gram counts
-        self.ngram_trans_count = self.init_dictionary_with_regexp(self.n, dict_type=int)
+        self.ngram_trans_count = defaultdict(int)
         # ngram state: state gram counts 
-        self.ngram_state_count = self.init_dictionary_with_regexp(self.n-1, dict_type=int)
-
-        # initialise probability dicts
-        # probability dictionary mapping trigram keys to smoothed probabilities
-        self.ngram_trans_prob = self.init_dictionary_with_regexp(self.n, dict_type=float)
-        # probability dictionary mapping bigram keys to smoothed probabilities
-        self.ngram_state_prob = self.init_dictionary_with_regexp(self.n-1, dict_type=float)
-
-        self.ngram_trans_count = self.count_ngrams(trainfile, self.ngram_trans_count)
+        self.ngram_state_count = defaultdict(int)
+        # raw counts
+        self.ngram_trans_count = self.count_ngrams(trainfile, self.ngram_trans_count, '')
+        self.ngram_trans_count = self.create_wildcard_keys(self.ngram_trans_count, 1)
+        # state counts
         self.update_state_count()
 
-        # Generate probabilities from the trigrams and bigrams using present counts
-        trigram_probabilities = self.add_alpha_smoothing(alpha)
+        # initialise probability dicts
+        self.ngram_trans_prob = defaultdict(float)
+        self.ngram_state_prob = defaultdict(float)
+        # probability dictionary mapping trigram keys to smoothed probabilities
+        self.ngram_trans_prob.update({k:float(0) for k in self.ngram_trans_count.keys()})
+        # probability dictionary mapping bigram keys to smoothed probabilities
+        self.ngram_state_prob.update({k:float(0) for k in self.ngram_state_count.keys()})
 
-    def count_ngrams(self, infile: str, ngram_count: dict) -> OrderedDict:
+        # Generate probabilities from the trigrams and bigrams using present counts
+        self.add_alpha_smoothing(alpha)
+
+    def create_wildcard_keys(self, ngram_count, n):
+        """
+        creates wildcard keys to compress model size
+        wildcard keys hold counts/probabilities true for the an 
+        uncommon character sequence
+        """
+        keys_sets = defaultdict(set)
+        
+        for key in ngram_count.keys():
+            keys_sets[key[:n]].add(key)
+        
+        # first step special case (some character doesn't exist at all!):
+        if n==1 and len(keys_sets.keys())!=len(self.str_set):
+            ngram_count[self.wildcard*self.n]=0
+        for key, key_set in keys_sets.items():
+            if len(key_set)==len(self.str_set):
+                continue
+            else:
+                ngram_count[key[:n]+self.wildcard*(self.n-n)]=0
+
+        # recursive logic
+        if n==self.n-1:
+            return ngram_count
+        else:
+            ngram_count.update(self.create_wildcard_keys(ngram_count, n+1))
+            return ngram_count
+
+
+    def count_ngrams(self, infile: str, ngram_count: dict, test_level: str) -> OrderedDict:
         """
         count ngrams from input file containing text for ngram counting
         for example, if we are counting ngrams, and the file text.txt
@@ -176,8 +184,21 @@ class CharGramTrainer(NGramModel):
                     continue
 
                 for j in range(0, len(line)-(self.n-1)):
+                    # window string
                     ngram = line[j:j+self.n]
                     ngram_count[ngram] += 1
+
+                if test_level == 'line':
+                    self.ngram_test_dict.update(ngram_count)
+                    pp = self.perplexity_given_test_counts()
+                    print(line, '\t', pp)
+                    ngram_count = defaultdict(int)
+                    self.ngram_test_dict = defaultdict(int)
+                elif test_level == 'file':
+                    pass
+        
+        if test_level == 'file':
+            self.ngram_test_dict.update(ngram_count)
 
         return OrderedDict(sorted(ngram_count.items(), key=lambda t: t[0]))
        
@@ -186,57 +207,51 @@ class CharGramTrainer(NGramModel):
         updates self.ngram_trans_prob dict
         setting alpha to zero will amount to MLE
         setting alpha to one will amount to add one smoothing
-
         """
-
         for trans, trans_count in self.ngram_trans_count.items():
 
             state = trans[:self.n-1]
             state_count = self.ngram_state_count[state]
-            # compression strategy
-            if trans_count==0.0 and state + self.WILDCARD in self.ngram_trans_prob.keys():
 
-                del self.ngram_trans_prob[trans]
-                continue
+            numerator =  trans_count + alpha
+            denominator = state_count + (state_count * alpha)
 
-            elif trans_count==0.0:
-                # Using wildcard will reduce model size
-                del self.ngram_trans_prob[trans]
-                trans = str(state + self.WILDCARD)
-                numerator = alpha
-
-            else:
-                numerator =  trans_count + alpha
-            
-            denominator = state_count + state_count * alpha
-
-            self.ngram_trans_prob[trans] = numerator / denominator
+            self.ngram_trans_prob.update({trans: (numerator / denominator)})
 
     def test(self, test_file:str, test_level:str) -> None:
         """
         Prints perplexity according to level (either file or line by line)
-        line-by-line level should print each line with each perplexity
+        line-by-line level should print each line with each line perplexity
         """
+
+        self.ngram_test_dict = defaultdict(int)
         if test_level=='file':
-            self.ngram_test_dict = self.init_dictionary_with_regexp(self.n, int)
-            self.ngram_test_dict = self.count_ngrams(test_file, self.ngram_test_dict)
+            self.ngram_test_dict = self.count_ngrams(test_file, self.ngram_test_dict, test_level)
             perplexity = self.perplexity_given_test_counts()
+            print("Final perplexity of " + str(test_file) + " with the training trigram probabilities is: " + str(perplexity))
+
         elif test_level=='line':
-            pass
-        
-        print("Final perplexity of " + str(test_file) + " with the training trigram probabilities is: " + str(perplexity))
+            self.count_ngrams(test_file, self.ngram_test_dict, test_level)
 
     def perplexity_given_test_counts(self) -> float:
         
         log_probabilities = 0.0
         N = 0
+        def try_get_key(minus, key):
+            """
+            get key by using wildcard
+            """
+            if key not in self.ngram_trans_prob.keys():
+                minus+=1
+                key = str( key[:len(key)-minus] + self.wildcard*minus )
+                return try_get_key(minus, key)
+            else:
+                return key
+            
         for k, v in self.ngram_test_dict.items():
             for p in range(0, int(v)):
                 N += 1
-                if k not in self.ngram_trans_prob.keys():
-                    prob = self.ngram_trans_prob.get(str(k[:2] + self.WILDCARD))
-                else:
-                    prob = self.ngram_trans_prob[k]
+                prob = self.ngram_trans_prob.get(try_get_key(0, k))
                 log_probabilities += log(prob, 2)
             
         perplexity = math.pow(2, (float(-1)/float(N))*log_probabilities)
@@ -254,43 +269,51 @@ class CharGramTrainer(NGramModel):
         """
         generates a random sequence of specified length based on a model
         """
-        step+=1
-        if step==1:
-            sequence = self.pad_char * (self.n - 1)
-        if steps_left == 0:
-            return sequence
-        else:
-            
-            wildcard=1 if self.WILDCARD in sequence[-1] else 0
+        while steps_left != 0:
 
+            step+=1
+            if step==1:
+                sequence = self.pad * (self.n - 1)
+            
             possible_trans = {}
+
             # find partial key for transition
             for (trans, prob) in self.ngram_trans_prob.items():
-                if trans[:(self.n-1)-wildcard]==sequence[-(self.n-1):(len(sequence)-wildcard)]:
-                    possible_trans.update({trans: prob})
+                partial_key = trans[:(self.n-1)-len(self.wildcard)]
+                partial_sequence = sequence[-(self.n-1):(len(sequence)-len(self.wildcard))]
 
+                if partial_key == partial_sequence:
+                    possible_trans.update({trans: prob})
+            
             trans_log_probs = np.array([p for p in possible_trans.values()])
             trans_log_probs /= trans_log_probs.sum()
-            next_char = np.random.choice(list(possible_trans.keys()), replace=True, p = list(trans_log_probs))[(self.n-1)-wildcard:]
-            sequence = sequence[:len(sequence)-wildcard] + next_char
+            next_char = np.random.choice(list(possible_trans.keys()), replace=True, p = list(trans_log_probs))
+
+            if self.wildcard in next_char:
+                # check the span that could contain wildcard
+                for _ in re.finditer(next_char[((self.n-1)-len(self.wildcard)):], self.wildcard):
+                    sequence = sequence[:len(sequence)-len(self.wildcard)] + np.random.choice(list(self.str_set), replace=True)
+            else:
+                sequence = sequence[:len(sequence)-len(self.wildcard)] + next_char[((self.n-1)-len(self.wildcard)):]
             
-            if(next_char == '#'):
+            if(next_char[-1] == self.pad):
                 # by definition for trigram two pad chars come after one another (line beginning)
-                sequence += '#'
+                sequence += self.pad
                 steps_left -=1
             
-            sequence = self.model_generate_random_seq(steps_left - 1, sequence, step)
+            steps_left-=1            
+        if steps_left == 0:
             return sequence
 
     def read_char_probabilities(self, file_in: str) -> None:
         """
         read probabilities from an input file
         """
-        self.ngram_trans_prob = default(float)
+        self.ngram_trans_prob = defaultdict(float)
         with open(file_in) as f:
             for line in f:
-                ngram, log_prob = line.strip().split("\t")
-                self.ngram_trans_prob.update({ngram: float(log_prob)})
+               ngram, log_prob = line.rstrip().split("\t")
+               self.ngram_trans_prob.update({ngram: float(log_prob)})
         print(f"Model read from {file_in}")
 
 
@@ -331,7 +354,7 @@ def get_args():
     parser.add_argument('--number', '-n', action='store', type=int, default=3, help="ngram level")
 
     parser.add_argument('--test-file', '-e', action='store', help="test file")
-    parser.add_argument('--test-level', '-x', action='store', help="test level")
+    parser.add_argument('--test-level', '-x', default='', action='store', help="test level")
 
     parser.add_argument('--alpha', action='store', type=float, default=0.7, help="alpha value for plus alpha smoothing")
 
@@ -341,8 +364,9 @@ def get_args():
     parser.add_argument('--diacritics', '-d', action='store', help="other latin based character with diacritics for language. e.g. ç, é, etc.")
     parser.add_argument('--punctuations', '-p', action='store', help="punctuation to consider in input")
     parser.add_argument('--lower', action='store_true', help="lowercase input for training and/or testing")
-    parser.add_argument('--pad', action='store', help="pad string for model")
 
+    parser.add_argument('--pad', action='store', default='#', help="pad string for model")
+    parser.add_argument('--wildcard', action='store', default='~', help="wildcard string for model compression")
     parser.add_argument('--random-sequence-length', '-r', action='store', type=int, help="length of random sequence based on trained/input model")
 
     args = parser.parse_args()
@@ -357,7 +381,8 @@ def main(args):
             lower = args.lower,
             diacritics = args.diacritics,
             punctuations = args.punctuations,
-            pad = args.pad
+            pad = args.pad,
+            wildcard = args.wildcard,
         )
 
     # Either we train, or input a pretrained model file
