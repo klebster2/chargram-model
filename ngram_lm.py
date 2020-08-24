@@ -1,7 +1,6 @@
 """ Authorship: Created at Edinburgh University:
  Kleber Noel (klebnoel@gmail.com) and Oliver Goldstein (oliverjgoldstein@gmail.com)
  This code was originally written for ANLP coursework to evaluate n-gram patterns in data. (Sept.-Nov. 2018)
- Kleber Noel changed the functionality of the code to a general case across European languages.
 """
 
 import re
@@ -18,10 +17,6 @@ import argparse
 import pdb
 import itertools
 
-TRAIN_METHODS={
-    'PLUS_ALPHA',
-    'PLUS_ONE',
-}
 
 class WordGramModel():
     def __init__(self):
@@ -404,10 +399,10 @@ def main(args):
             args.model_in,
         )
         
-        # Tests 
-        # test_bigram_bin_size(bigram, bigram_bin_size)
-        # test_training_probabilities(trigram_probabilities)
-        # test_sum_to_one(new_trigram_probabilities)
+    # Tests 
+    # test_bigram_bin_size(bigram, bigram_bin_size)
+    # test_training_probabilities(trigram_probabilities)
+    # test_sum_to_one(new_trigram_probabilities)
 
     if args.test_file and args.test_level:
         tri_trainer.test(
