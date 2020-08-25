@@ -16,15 +16,17 @@ import math
 import argparse
 import pdb
 import itertools
+import os
 
-
-class WordGramModel():
-    def __init__(self):
-        pass
+class bcolors:
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    ENDC = '\033[0m'
+    UNDERLINE = '\033[4m'
 
 class NGramModel():
 
-    def __init__(self, n, lower, pad, wildcard, diacritics, punctuations):
+    def __init__(self, n, lower, pad, wildcard, diacritics, punctuations, verbose):
         """
         n: define n in 'ngrams' to build a model for
         lower: lowercase input and model
@@ -35,6 +37,8 @@ class NGramModel():
         self.lower = lower
         self.pad = pad
         self.wildcard = wildcard
+        self.verbose = verbose
+
         diacritics_str = self.load_str_set(diacritics)
         # punctuations can be special characters
         punctuations_str = self.load_str_set(punctuations)
@@ -79,12 +83,132 @@ class NGramModel():
         line = str(''.join([self.pad] * (self.n - 1))) + line + self.pad
         return line
 
+    def count_ngrams(self, infile: str, ngram_count: dict, test_level: str) -> OrderedDict:
+        """
+        count ngrams from input file containing text for ngram counting
+        for example, if we are counting ngrams, and the file text.txt
+        input containing only:
+            hello world
+        we will have the following counts:
+            ##h: 1
+            #he: 1
+            hel: 1
+            ell: 1
+            llo: 1
+            lo : 1
+            o w: 1
+             wo: 1
+            wor: 1
+            orl: 1
+            rld: 1
+            ld#: 1
+        """
+        with open(infile) as f:
+            for line in f:
+                line = self.preprocess_line(line)
+                if len(line) <= self.n:
+                    # count caveat: ignore empty lines
+                    continue
+
+                for j in range(0, len(line)-(self.n-1)):
+                    # window string
+                    ngram = line[j:j+self.n]
+                    ngram_count[ngram] += 1
+
+                if test_level == 'line':
+                    self.ngram_test_dict.update(ngram_count)
+                    pp = self.perplexity_given_test_counts()
+                    print(line, '\t', pp)
+                    ngram_count = defaultdict(int)
+                    self.ngram_test_dict = defaultdict(int)
+                elif test_level == 'file':
+                    pass
+        
+        if test_level == 'file':
+            self.ngram_test_dict.update(ngram_count)
+
+        return OrderedDict(sorted(ngram_count.items(), key=lambda t: t[0]))
+       
+
+    def model_generate_random_seq(self, pretty_print:bool, steps_left:int, sequence='', step=0) -> str:
+        """
+        generates a random sequence of specified length based on a model
+        """
+        full_sequence = ''
+        rows, columns = os.popen('stty size', 'r').read().split()
+        while steps_left > 0:
+
+            step+=1
+            if step==1:
+                sequence = self.pad * (self.n - 1)
+            
+            possible_trans = {}
+            # find partial key for transition
+            for (trans, prob) in self.ngram_trans_prob.items():
+                partial_key = trans[:(self.n-1)-len(self.wildcard)]
+                partial_sequence = sequence[-(self.n-1):(len(sequence)-len(self.wildcard))]
+
+                if partial_key == partial_sequence:
+                    possible_trans.update({trans: prob})
+            
+            trans_log_probs = np.array([p for p in possible_trans.values()])
+            trans_log_probs /= trans_log_probs.sum()
+            next_char = np.random.choice(list(possible_trans.keys()), replace=True, p = list(trans_log_probs))
+
+            if self.wildcard in next_char:
+                # check the span that could contain wildcard
+                for _ in re.finditer(next_char[((self.n-1)-len(self.wildcard)):], self.wildcard):
+                    sequence = sequence[:len(sequence)-len(self.wildcard)] + np.random.choice(list(self.str_set), replace=True)
+            else:
+                sequence = sequence[:len(sequence)-len(self.wildcard)] + next_char[((self.n-1)-len(self.wildcard)):]
+            
+            if(next_char[-1] == self.pad):
+                # by definition for trigram two pad chars come after one another (line beginning)
+                sequence += self.pad*(self.n-1)
+                steps_left -= 1
+
+            # when showing output
+            if pretty_print:
+                if len(sequence)%(int(columns)-3)!=0: 
+                    print(sequence, end='\r')
+                else:
+                    full_sequence+=sequence[:self.n-1]
+                    sequence=sequence[:self.n-1]
+                    print(sequence, end='\n')
+            steps_left-=1   
+        print('\n\n')         
+        full_sequence+=sequence
+        
+        return full_sequence
+
+
+    def add_alpha_smoothing(self, alpha:float) -> None:
+        """
+        updates self.ngram_trans_prob dict
+        setting alpha to zero will amount to MLE
+        setting alpha to one will amount to add one smoothing
+        """
+        for trans, trans_count in self.ngram_trans_count.items():
+
+            state = trans[:self.n-1]
+            state_count = self.ngram_state_count[state]
+
+            numerator =  trans_count + alpha
+            denominator = state_count + (state_count * alpha)
+
+            self.ngram_trans_prob.update({trans: (numerator / denominator)})
+
+
+class WordGramTrainer():
+    def __init__(self):
+        pass
+
 
 class CharGramTrainer(NGramModel):
     
-    def __init__(self, n:int, lower:bool, pad:str, wildcard:str, diacritics:str, punctuations:str):
+    def __init__(self, n:int, lower:bool, pad:str, wildcard:str, diacritics:str, punctuations:str, verbose:bool):
         self.n = n
-        NGramModel.__init__(self, n, lower, pad, wildcard, diacritics, punctuations)
+        NGramModel.__init__(self, n, lower, pad, wildcard, diacritics, punctuations, verbose)
 
     def update_state_count(self) -> None:
         """
@@ -150,69 +274,6 @@ class CharGramTrainer(NGramModel):
             ngram_count.update(self.create_wildcard_keys(ngram_count, n+1))
             return ngram_count
 
-
-    def count_ngrams(self, infile: str, ngram_count: dict, test_level: str) -> OrderedDict:
-        """
-        count ngrams from input file containing text for ngram counting
-        for example, if we are counting ngrams, and the file text.txt
-        input containing only:
-            hello world
-        we will have the following counts:
-            ##h: 1
-            #he: 1
-            hel: 1
-            ell: 1
-            llo: 1
-            lo : 1
-            o w: 1
-             wo: 1
-            wor: 1
-            orl: 1
-            rld: 1
-            ld#: 1
-        """
-        with open(infile) as f:
-            for line in f:
-                line = self.preprocess_line(line)
-                if len(line) <= self.n:
-                    # count caveat: ignore empty lines
-                    continue
-
-                for j in range(0, len(line)-(self.n-1)):
-                    # window string
-                    ngram = line[j:j+self.n]
-                    ngram_count[ngram] += 1
-
-                if test_level == 'line':
-                    self.ngram_test_dict.update(ngram_count)
-                    pp = self.perplexity_given_test_counts()
-                    print(line, '\t', pp)
-                    ngram_count = defaultdict(int)
-                    self.ngram_test_dict = defaultdict(int)
-                elif test_level == 'file':
-                    pass
-        
-        if test_level == 'file':
-            self.ngram_test_dict.update(ngram_count)
-
-        return OrderedDict(sorted(ngram_count.items(), key=lambda t: t[0]))
-       
-    def add_alpha_smoothing(self, alpha:float) -> None:
-        """
-        updates self.ngram_trans_prob dict
-        setting alpha to zero will amount to MLE
-        setting alpha to one will amount to add one smoothing
-        """
-        for trans, trans_count in self.ngram_trans_count.items():
-
-            state = trans[:self.n-1]
-            state_count = self.ngram_state_count[state]
-
-            numerator =  trans_count + alpha
-            denominator = state_count + (state_count * alpha)
-
-            self.ngram_trans_prob.update({trans: (numerator / denominator)})
-
     def test(self, test_file:str, test_level:str) -> None:
         """
         Prints perplexity according to level (either file or line by line)
@@ -230,6 +291,10 @@ class CharGramTrainer(NGramModel):
 
     def perplexity_given_test_counts(self) -> float:
         
+        BLUE = '\033[94m'
+        GREEN = '\033[92m'
+        ENDC = '\033[0m'
+        UNDERLINE = '\033]4m'
         log_probabilities = 0.0
         N = 0
         def try_get_key(minus, key):
@@ -239,14 +304,20 @@ class CharGramTrainer(NGramModel):
             if key not in self.ngram_trans_prob.keys():
                 minus+=1
                 key = str( key[:len(key)-minus] + self.wildcard*minus )
+                if self.verbose:
+                    print(bcolors.OKBLUE + key + bcolors.ENDC)
                 return try_get_key(minus, key)
             else:
+                if self.verbose:
+                    print(bcolors.OKGREEN + key + bcolors.ENDC, end='\r')
                 return key
             
         for k, v in self.ngram_test_dict.items():
+            prob = self.ngram_trans_prob.get(try_get_key(0, k))
+            if self.verbose:
+                print(' ', prob, end='\n')
             for p in range(0, int(v)):
                 N += 1
-                prob = self.ngram_trans_prob.get(try_get_key(0, k))
                 log_probabilities += log(prob, 2)
             
         perplexity = math.pow(2, (float(-1)/float(N))*log_probabilities)
@@ -259,47 +330,6 @@ class CharGramTrainer(NGramModel):
         f.close()
         print(f"Model written to {file_out}")
     
-
-    def model_generate_random_seq(self, steps_left:int, sequence='', step=0) -> str:
-        """
-        generates a random sequence of specified length based on a model
-        """
-        while steps_left != 0:
-
-            step+=1
-            if step==1:
-                sequence = self.pad * (self.n - 1)
-            
-            possible_trans = {}
-
-            # find partial key for transition
-            for (trans, prob) in self.ngram_trans_prob.items():
-                partial_key = trans[:(self.n-1)-len(self.wildcard)]
-                partial_sequence = sequence[-(self.n-1):(len(sequence)-len(self.wildcard))]
-
-                if partial_key == partial_sequence:
-                    possible_trans.update({trans: prob})
-            
-            trans_log_probs = np.array([p for p in possible_trans.values()])
-            trans_log_probs /= trans_log_probs.sum()
-            next_char = np.random.choice(list(possible_trans.keys()), replace=True, p = list(trans_log_probs))
-
-            if self.wildcard in next_char:
-                # check the span that could contain wildcard
-                for _ in re.finditer(next_char[((self.n-1)-len(self.wildcard)):], self.wildcard):
-                    sequence = sequence[:len(sequence)-len(self.wildcard)] + np.random.choice(list(self.str_set), replace=True)
-            else:
-                sequence = sequence[:len(sequence)-len(self.wildcard)] + next_char[((self.n-1)-len(self.wildcard)):]
-            
-            if(next_char[-1] == self.pad):
-                # by definition for trigram two pad chars come after one another (line beginning)
-                sequence += self.pad
-                steps_left -=1
-            
-            steps_left-=1            
-        if steps_left == 0:
-            return sequence
-
     def read_char_probabilities(self, file_in: str) -> None:
         """
         read probabilities from an input file
@@ -364,6 +394,8 @@ def get_args():
     parser.add_argument('--wildcard', action='store', default='~', help="wildcard string for model compression")
     parser.add_argument('--random-sequence-length', '-r', action='store', type=int, help="length of random sequence based on trained/input model")
 
+    parser.add_argument('--verbose', action='store_true', default=False, help="print messages")
+
     args = parser.parse_args()
     return args
 
@@ -378,6 +410,7 @@ def main(args):
             punctuations = args.punctuations,
             pad = args.pad,
             wildcard = args.wildcard,
+            verbose = args.verbose
         )
 
     # Either we train, or input a pretrained model file
@@ -414,6 +447,7 @@ def main(args):
         random_seq_new = \
             tri_trainer.model_generate_random_seq(
                 steps_left = args.random_sequence_length,
+                pretty_print = True,
         )
         pdb.set_trace()
         if args.model_in:
