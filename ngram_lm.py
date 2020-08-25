@@ -39,7 +39,6 @@ class NGramModel():
         self.verbose = verbose
 
         diacritics_str = self.load_str_set(diacritics)
-        # punctuations can be special characters
         punctuations_str = self.load_str_set(punctuations)
 
         self.others = f'{diacritics_str}{punctuations_str} '
