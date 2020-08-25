@@ -2,7 +2,6 @@
  Kleber Noel (klebnoel@gmail.com) and Oliver Goldstein (oliverjgoldstein@gmail.com)
  This code was originally written for ANLP coursework to evaluate n-gram patterns in data. (Sept.-Nov. 2018)
 """
-
 import re
 import sys
 import random
@@ -132,7 +131,7 @@ class NGramModel():
 
     def model_generate_random_seq(self, pretty_print:bool, steps_left:int, sequence='', step=0) -> str:
         """
-        generates a random sequence of specified length based on a model
+        generates a random sequence of specified length based on a model trained, or input
         """
         full_sequence = ''
         rows, columns = os.popen('stty size', 'r').read().split()
