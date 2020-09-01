@@ -4,7 +4,7 @@ Commands can be run to create character level language models, evaluate test fil
 
 ## Why pad?
 
-We pad in order to generate perplexity faster. Transition and emission probabilities associated with the HMM lattice our model will generate are precomputed and stored in the model file.
+We pad in order to generate perplexity faster. Transition and emission perplexities associated with the HMM lattice our model will generate are precomputed and stored in the model file.
 
 ## How does the wildcard character work?
 
