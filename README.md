@@ -20,7 +20,7 @@ The language model will be generated with reading information and probabilities.
 python ngram_lm.py --level char --train-file <train_file> --number <N> --alpha <alpha> -o <model> --diacritics <diacritics_list> --wildcard "~" --verbose --punctuations <punctuation_list> --lower
 ```
 
-If you don't have a corpus to use you can download an open source corpus such as the brown or gutenberg corpus from python's (nltk)[https://www.nltk.org/].
+If you don't have a corpus to use you can download an open source corpus such as the brown or gutenberg corpus from python's [nltk](https://www.nltk.org/).
 
 For example running the following from a python interpreter will output the file `nltk_gutenberg` in your local directory.
 
@@ -42,19 +42,14 @@ python ngram_lm.py --level char --train-file nltk_gutenberg --number 3 --alpha 0
 
 ## Testing:
 
-Command to test a model on a test file directly after training:
+Command to test a model on a test file:
 ```bash
-python ngram_lm.py --model-in gutenberg_model -r 100 --verbose
-```
-
-Command to test a model on a file:
-```bash
-python ngram_lm.py --model-in gutenberg_model -r 100 --verbose
+python ngram_lm.py --test-file nltk_brown --test-level file --model-in gutenberg_model --verbose
 ```
 
 Command to test a model on a test file linewise:
 ```bash
-python ngram_lm.py --model-in gutenberg_model -r 100 --verbose
+python ngram_lm.py --test-file nltk_brown --test-level line --model-in gutenberg_model --verbose
 ```
 
 ## Generation:
