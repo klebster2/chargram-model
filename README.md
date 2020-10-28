@@ -1,4 +1,4 @@
-# perplexity-toolkit
+# chargram model
 
 Commands can be run to create character level language models, evaluate test files, and generate a random sequence using a model. There is currently no functionality for word level models.
 
