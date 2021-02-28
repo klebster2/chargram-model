@@ -61,4 +61,6 @@ python ngram_lm.py --model-in my_model -r 100 --verbose
 ```
 The following example is sped up by x7. Generation using large models can be slow.
 
+TODO: Add speed up generation
+
 ![gutenberg_example](https://github.com/klebster2/perplexity-toolkit/blob/master/gutenberg_example.gif "An example of generating characters using a 10-gram gutenberg model")
