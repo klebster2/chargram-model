@@ -8,7 +8,7 @@ We pad in order to generate perplexity faster. Transition and emission probabili
 
 ## How does the wildcard character work?
 
-Models can become very large even for character LMs. The wildcard character reduces model size for add alpha smoothing. When preprocessing an input corpus, the wildcard character first is removed from input, then the wildcard is added to the end of any character sequence for which there were no observations in the training set. During testing or sequence generation, the wildcard character corresponds to character sequences that share the same (low) perplexity.
+Models can become very large even for character LMs. The wildcard character reduces model size for add alpha smoothing. When preprocessing an input corpus, the wildcard character first is removed from input, then the wildcard is added to the end of any character sequence for which there were no observations in the training set. During testing, the wildcard character corresponds to character sequences that share the same smoothed perplexity.
 
 ## Training:
 
